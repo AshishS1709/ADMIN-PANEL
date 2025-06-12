@@ -402,3 +402,10 @@ async def get_rebooking_suggestions(
         query = query.filter(QuickRebookingSuggestion.accepted == accepted)
     
     return query.all()
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Run the server
+    uvicorn.run(app, host="127.0.0.1", port=8005)
+    #://127.0.0.1:8004

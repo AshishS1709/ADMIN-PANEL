@@ -16,13 +16,6 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 class ShiftStatus(str, PyEnum):
     ACTIVE = "active"
     COMPLETED = "completed"
@@ -62,6 +55,7 @@ class Worker(Base):
     
     shifts = relationship("Shift", back_populates="worker")
 
+# Pydantic Models
 class WorkerBase(BaseModel):
     name: str
     status: bool = True
@@ -86,27 +80,6 @@ class ShiftBase(BaseModel):
     worker_id: int
     notes: Optional[str] = None
 
-class ShiftCreate(ShiftBase):
-    pass
-
-class ShiftResponse(ShiftBase):
-    id: int
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 class ShiftCreate(BaseModel):
     start_time: datetime
     end_time: datetime
@@ -119,8 +92,13 @@ class ShiftUpdate(BaseModel):
     flag: Optional[ShiftFlag] = None
     notes: Optional[str] = None
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+class ShiftResponse(ShiftBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 # Middleware
 app.add_middleware(
@@ -131,16 +109,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Dependency
-async def get_db():
+# Dependency - SINGLE DEFINITION
+def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
+# API Endpoints
 @app.get("/shifts", response_model=List[ShiftResponse])
-async def get_shifts(
+def get_shifts(
     db: Session = Depends(get_db),
     status: Optional[ShiftStatus] = None,
     flag: Optional[ShiftFlag] = None,
@@ -164,15 +143,27 @@ async def get_shifts(
     return query.all()
 
 @app.post("/shifts", response_model=ShiftResponse)
-async def create_shift(shift: ShiftCreate, db: Session = Depends(get_db)):
-    db_shift = Shift(**shift.dict())
+def create_shift(shift: ShiftCreate, db: Session = Depends(get_db)):
+    # Check if worker exists
+    worker = db.query(Worker).filter(Worker.id == shift.worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    
+    db_shift = Shift(
+        start_time=shift.start_time,
+        end_time=shift.end_time,
+        worker_id=shift.worker_id,
+        flag=shift.flag,
+        notes=shift.notes,
+        status=ShiftStatus.ACTIVE
+    )
     db.add(db_shift)
     db.commit()
     db.refresh(db_shift)
     return db_shift
 
 @app.put("/shifts/{shift_id}", response_model=ShiftResponse)
-async def update_shift(shift_id: int, shift_update: ShiftUpdate, db: Session = Depends(get_db)):
+def update_shift(shift_id: int, shift_update: ShiftUpdate, db: Session = Depends(get_db)):
     db_shift = db.query(Shift).filter(Shift.id == shift_id).first()
     if not db_shift:
         raise HTTPException(status_code=404, detail="Shift not found")
@@ -185,7 +176,7 @@ async def update_shift(shift_id: int, shift_update: ShiftUpdate, db: Session = D
     return db_shift
 
 @app.get("/workers", response_model=List[WorkerResponse])
-async def get_workers(
+def get_workers(
     db: Session = Depends(get_db),
     is_standby: Optional[bool] = None,
     is_available: Optional[bool] = None
@@ -200,7 +191,7 @@ async def get_workers(
     return query.all()
 
 @app.post("/workers", response_model=WorkerResponse)
-async def create_worker(worker: WorkerCreate, db: Session = Depends(get_db)):
+def create_worker(worker: WorkerCreate, db: Session = Depends(get_db)):
     db_worker = Worker(**worker.dict())
     db.add(db_worker)
     db.commit()
@@ -208,7 +199,7 @@ async def create_worker(worker: WorkerCreate, db: Session = Depends(get_db)):
     return db_worker
 
 @app.post("/workers/{worker_id}/assign-shift", response_model=ShiftResponse)
-async def assign_shift_to_worker(
+def assign_shift_to_worker(
     worker_id: int,
     shift_id: int,
     db: Session = Depends(get_db)
@@ -227,7 +218,7 @@ async def assign_shift_to_worker(
     return shift
 
 @app.get("/shifts/available-workers", response_model=List[WorkerResponse])
-async def get_available_workers(
+def get_available_workers(
     shift_start: datetime,
     shift_end: datetime,
     db: Session = Depends(get_db)
@@ -238,21 +229,27 @@ async def get_available_workers(
     ).all()
     
     # Filter out workers who have conflicting shifts
-    workers_to_exclude = db.query(Shift.worker_id).filter(
+    conflicting_worker_ids = db.query(Shift.worker_id).filter(
         Shift.start_time < shift_end,
         Shift.end_time > shift_start,
         Shift.status == ShiftStatus.ACTIVE
-    ).distinct()
+    ).distinct().all()
+    
+    conflicting_ids = [row[0] for row in conflicting_worker_ids]
     
     return [
         worker for worker in available_workers
-        if worker.id not in workers_to_exclude
+        if worker.id not in conflicting_ids
     ]
 
 def populate_test_data():
     """Populate some test data for testing"""
     db = SessionLocal()
     try:
+        # Check if data already exists
+        if db.query(Worker).count() > 0:
+            return
+            
         # Create test workers
         workers = [
             Worker(name="John Doe", status=True, is_standby=False),
@@ -288,4 +285,13 @@ def populate_test_data():
         db.close()
 
 if __name__ == "__main__":
+    import uvicorn
+    
+    # Create all tables
+    Base.metadata.create_all(bind=engine)
+    
+    # Populate test data
     populate_test_data()
+    
+    # Run the server
+    uvicorn.run(app, host="0.0.0.0", port=8002)
