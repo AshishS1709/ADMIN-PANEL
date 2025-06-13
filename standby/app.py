@@ -34,7 +34,7 @@ else:
     print("Warning: ai_routes.py not found")
 
 # --- Local Imports ---
-from models import db, Worker, StandbyRecord, Shift
+from .models import db, Worker, StandbyRecord, Shift
 
 # Try to import AI routes
 try:

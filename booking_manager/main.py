@@ -11,7 +11,8 @@ from enum import Enum as PyEnum
 app = FastAPI(title="Booking Manager API")
 
 # Database configuration
-SQLALCHEMY_DATABASE_URL = "sqlite:///./bookings.db"
+import os
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'bookings.db')}"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
