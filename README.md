@@ -61,7 +61,8 @@ A microservices-based booking platform with multiple independent services:
 1. **Prerequisites**
    - Render account
    - Git repository with the code
-   - Python 3.10 or higher
+   - Python 3.11 (use python:3.11-slim for Docker)
+     - Note: Python 3.13 is not recommended as some dependencies may not be compatible
 
 2. **Files Required**
    - [requirements.txt](cci:7://file:///c:/Users/ashis/Watsapp/requirements.txt:0:0-0:0) - Python dependencies
